@@ -2,10 +2,168 @@ package models
 
 import (
 	"container/list"
+	"errors"
+	"strconv"
 )
 
 // Row is just an array of objects
 type Row []interface{}
+
+func (r *Row) getInt32Value(columnId int) (int32, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return int32((*r)[columnId].(int)), nil
+		case int32:
+			return (*r)[columnId].(int32), nil
+		case int64:
+			return int32((*r)[columnId].(int64)), nil
+		case float32:
+			return int32((*r)[columnId].(float32)), nil
+		case float64:
+			return int32((*r)[columnId].(float64)), nil
+		case bool:
+			if (*r)[columnId].(bool) {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		case string:
+			int32v, err := strconv.Atoi((*r)[columnId].(string))
+			return int32(int32v), err
+		default:
+			return -1, errors.New("unknown data type")
+	}
+}
+
+func (r *Row) getInt64Value(columnId int) (int64, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return int64((*r)[columnId].(int)), nil
+		case int32:
+			return int64((*r)[columnId].(int32)), nil
+		case int64:
+			return (*r)[columnId].(int64), nil
+		case float32:
+			return int64((*r)[columnId].(float32)), nil
+		case float64:
+			return int64((*r)[columnId].(float64)), nil
+		case bool:
+			if (*r)[columnId].(bool) {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		case string:
+			int64v, err := strconv.ParseInt((*r)[columnId].(string), 10, 64)
+			return int64v, err
+		default:
+			return -1, errors.New("unknown data type")
+	}
+}
+
+func (r *Row) getFloat32Value(columnId int) (float32, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return float32((*r)[columnId].(int)), nil
+		case int32:
+			return float32((*r)[columnId].(int32)), nil
+		case int64:
+			return float32((*r)[columnId].(int64)), nil
+		case float32:
+			return (*r)[columnId].(float32), nil
+		case float64:
+			return float32((*r)[columnId].(float64)), nil
+		case bool:
+			if (*r)[columnId].(bool) {
+				return 1.0, nil
+			} else {
+				return 0.0, nil
+			}
+		case string:
+			float32v, err := strconv.ParseFloat((*r)[columnId].(string), 32)
+			return float32(float32v), err
+		default:
+			return -1, errors.New("unknown data type")
+	}
+}
+
+func (r *Row) getFloat64Value(columnId int) (float64, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return float64((*r)[columnId].(int)), nil
+		case int32:
+			return float64((*r)[columnId].(int32)), nil
+		case int64:
+			return float64((*r)[columnId].(int64)), nil
+		case float32:
+			return float64((*r)[columnId].(float32)), nil
+		case float64:
+			return (*r)[columnId].(float64), nil
+		case bool:
+			if (*r)[columnId].(bool) {
+				return 1.0, nil
+			} else {
+				return 0.0, nil
+			}
+		case string:
+			float64v, err := strconv.ParseFloat((*r)[columnId].(string), 64)
+			return float64v, err
+		default:
+			return -1, errors.New("unknown data type")
+	}
+}
+
+func (r *Row) getBoolValue(columnId int) (bool, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return (*r)[columnId].(int) != 0, nil
+		case int32:
+			return (*r)[columnId].(int32) != 0, nil
+		case int64:
+			return (*r)[columnId].(int64) != 0, nil
+		case float32:
+			return (*r)[columnId].(float32) != 0, nil
+		case float64:
+			return (*r)[columnId].(float64) != 0, nil
+		case bool:
+			return (*r)[columnId].(bool), nil
+		case string:
+			if (*r)[columnId].(string) == "true" {
+				return true, nil
+			} else if (*r)[columnId].(string) == "false" {
+				return false, nil
+			} else {
+				return false, errors.New("unknown data type")
+			}
+		default:
+			return false, errors.New("unknown data type")
+	}
+}
+
+func (r *Row) getStringValue(columnId int) (string, error) {
+	switch (*r)[columnId].(type) {
+		case int:
+			return strconv.Itoa((*r)[columnId].(int)), nil
+		case int32:
+			return strconv.Itoa(int((*r)[columnId].(int32))), nil
+		case int64:
+			return strconv.FormatInt((*r)[columnId].(int64), 10), nil
+		case float32:
+			return strconv.FormatFloat(float64((*r)[columnId].(float32)), 'E', -1, 32), nil
+		case float64:
+			return strconv.FormatFloat((*r)[columnId].(float64), 'E', -1, 32), nil
+		case bool:
+			if (*r)[columnId].(bool) {
+				return "true", nil
+			} else {
+				return "false", nil
+			}
+		case string:
+			return (*r)[columnId].(string), nil
+		default:
+			return "", errors.New("unknown data type")
+	}
+}
 
 // Equals compares two rows by their length and each element
 func (r *Row) Equals(another *Row) bool {
@@ -21,7 +179,7 @@ func (r *Row) Equals(another *Row) bool {
 }
 
 // EqualsWithColumnMapping compares two rows each element with the provided columnMapping, which indicate the index of
-// each column of this row in another row. This method assumes, as the columnMapping is provided, the two rows have the
+// each ColumnName of this row in another row. This method assumes, as the columnMapping is provided, the two rows have the
 // same length.
 func (r *Row) EqualsWithColumnMapping(another *Row, columnMapping []int) bool {
 	for i, column := range *r {

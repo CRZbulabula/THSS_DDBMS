@@ -3,6 +3,7 @@ package models
 import (
 	"../labgob"
 	"../labrpc"
+	"encoding/json"
 	"fmt"
 	"strconv"
 )
@@ -105,14 +106,106 @@ func (c* Cluster) Join(tableNames []string, reply *Dataset) {
 	//TODO lab2
 }
 
-func (c* Cluster) BuildTable(params []interface{}, reply *string) {
-	//schema := params[0]
-	//rules := params[1]
+func (c* Cluster) isNodeExists(nodeId string) bool {
+	for _, internalId := range c.nodeIds {
+		if nodeId == internalId {
+			return true
+		}
+	}
+	return false
+}
 
+func (c* Cluster) BuildTable(params []interface{}, reply *string) {
+	labgob.Register([]Predicate{})
+	schema, schemaErr := params[0].(TableSchema)
+	if schemaErr != true {
+		*reply = "Build table error: Cannot cast params[0] to type TableSchema!"
+		return
+	}
+	var rules map[string]interface{}
+	jsonErr := json.Unmarshal(params[1].([]byte), &rules)
+	if jsonErr != nil {
+		*reply = "Build table error: Cannot cast params[1] to json!"
+		return
+	}
+
+	endNamePrefix := "InternalClient"
+	nodeNamePrefix := "Node"
+	for nodeId, reluMap := range rules {
+		if !c.isNodeExists(nodeNamePrefix + nodeId) {
+			*reply = "Build table error: Node doesn't exist!"
+			return
+		}
+		rule, ruleErr := reluMap.(map[string]interface{})
+		if ruleErr != true {
+			*reply = "Build table error: Cannot cast rule in param[1]!"
+			return
+		}
+
+		endName := endNamePrefix + nodeNamePrefix + nodeId
+		end := c.network.MakeEnd(endName)
+		c.network.Connect(endName, nodeNamePrefix + nodeId)
+		c.network.Enable(endName, true)
+
+		var columnSchemas []ColumnSchema
+		var columnIds []int
+		for _, columnName := range rule["column"].([]interface{}) {
+			var dataType = schema.getDataType(columnName.(string))
+			var columnId = schema.getColumnId(columnName.(string))
+			if dataType == -1 {
+				*reply = "Build table error: Unknown ColumnName name!"
+				return
+			}
+			var columnSchema = ColumnSchema{
+				columnName.(string),
+				dataType,
+			}
+			columnSchemas = append(columnSchemas, columnSchema)
+			columnIds = append(columnIds, columnId)
+		}
+		tableSchema := TableSchema{
+			TableName: schema.TableName,
+			ColumnSchemas: columnSchemas,
+		}
+		var ps []Predicate
+		for columnName, predicates := range rule["predicate"].(map[string]interface{}) {
+			for _, predicate := range predicates.([]interface{}) {
+
+				var p = Predicate{
+					columnName,
+					predicate.(map[string]interface{})["op"].(string),
+					schema.getDataType(columnName),
+					predicate.(map[string]interface{})["val"],
+				}
+				ps = append(ps, p)
+			}
+		}
+
+		end.Call("Node.CreateTableRPC", []interface{}{tableSchema, columnIds, ps, schema}, reply)
+		if *reply != "" {
+			return
+		}
+ 	}
+
+	*reply = "Build table success"
 }
 
 func (c* Cluster) FragmentWrite(params []interface{}, reply *string) {
-	//tableName := params[0]
-	//row := params[1]
+	tableName := params[0].(string)
+	row := params[1].(Row)
 
+	endNamePrefix := "InternalClient"
+	for _, nodeId := range c.nodeIds {
+		endName := endNamePrefix + nodeId
+		end := c.network.MakeEnd(endName)
+		c.network.Connect(endName, nodeId)
+		c.network.Enable(endName, true)
+
+		end.Call("Node.InsertRPC", []interface{}{tableName, row}, &reply)
+		if *reply != "" {
+			return
+		}
+	}
+
+	*reply = "Fragment write success"
 }
