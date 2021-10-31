@@ -9,6 +9,7 @@ import (
 // Row is just an array of objects
 type Row []interface{}
 
+// Row getters
 func (r *Row) getInt32Value(columnId int) (int32, error) {
 	switch (*r)[columnId].(type) {
 		case int:

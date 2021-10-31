@@ -38,6 +38,7 @@ func (n *Node) SayHello(args interface{}, reply *string) {
 	*reply = fmt.Sprintf("Hello %s, I am Node %s", args, n.Identifier)
 }
 
+// CreateTableRPC is an RPC interface for create table on specified node
 func (n *Node) CreateTableRPC(args []interface{}, reply *string) {
 	schema, schemaErr := args[0].(TableSchema)
 	columnIds, columnIdsErr := args[1].([]int)
@@ -86,6 +87,7 @@ func (n *Node) CreateTable(schema *TableSchema) error {
 	return nil
 }
 
+// InsertRPC is an RPC interface for insert a row into specified table
 func (n *Node) InsertRPC(args []interface{}, reply *string) {
 	tableName := args[0].(string)
 	row := args[1].(Row)
@@ -107,12 +109,14 @@ func (n *Node) InsertRPC(args []interface{}, reply *string) {
 	}
 }
 
+// PredicateCheck checks whether a row is satisfied all predicates
 func (n *Node) PredicateCheck(tableName string, row *Row) (bool, error) {
 	if ps, ok := n.predicates[tableName]; ok {
 		schema := n.SchemaMap[tableName]
 		for _, p := range ps {
 			var lessFlag, equalFlag bool
 			columnId := schema.getColumnId(p.ColumnName)
+			// get comparison results based on data types
 			switch p.DataType {
 				case TypeInt32:
 					rowValue, err := row.getInt32Value(columnId)
@@ -163,6 +167,7 @@ func (n *Node) PredicateCheck(tableName string, row *Row) (bool, error) {
 					equalFlag = rowValue == p.Value.(string)
 					break
 			}
+			// check predicates
 			switch p.Operator {
 				case "<":
 					if !lessFlag {
