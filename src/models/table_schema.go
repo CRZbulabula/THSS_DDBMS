@@ -23,3 +23,14 @@ func (ts* TableSchema) getDataType(columnName string) int {
 	}
 	return -1
 }
+
+func (ts* TableSchema) getForeignKey(joinSchema TableSchema) (int, int) {
+	for i, columnI := range ts.ColumnSchemas {
+		for j, columnJ := range joinSchema.ColumnSchemas {
+			if columnI.Name == columnJ.Name {
+				return i, j
+			}
+		}
+	}
+	return -1, -1
+}

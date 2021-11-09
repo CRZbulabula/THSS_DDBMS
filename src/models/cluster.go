@@ -103,7 +103,64 @@ func (c *Cluster) SayHello(visitor string, reply *string) {
 // Join all tables in the given list using NATURAL JOIN (join on the common columns), and return the joined result
 // as a list of rows and set it to reply.
 func (c* Cluster) Join(tableNames []string, reply *Dataset) {
-	//TODO lab2
+	labgob.Register(Dataset{})
+
+	endNamePrefix := "InternalClient"
+
+	var cachedDataSet []Dataset
+	for i, tableName := range tableNames {
+		if i == len(tableNames) - 1 {
+			break
+		}
+
+		var curDataSet []Dataset
+		for _, remoteId := range c.nodeIds {
+			remoteEndName := endNamePrefix + remoteId
+			remoteEnd := c.network.MakeEnd(remoteEndName)
+			c.network.Connect(remoteEndName, remoteId)
+			c.network.Enable(remoteEndName, true)
+
+			var remoteDataSet Dataset
+			remoteEnd.Call("Node.ScanTable", tableName, &remoteDataSet)
+
+			if remoteDataSet.Rows != nil {
+				for _, localId := range  c.nodeIds {
+					localEndName := endNamePrefix + localId
+					localEnd := c.network.MakeEnd(localEndName)
+					c.network.Connect(localEndName, localId)
+					c.network.Enable(localEndName, true)
+
+					var resultDataSet Dataset
+					localEnd.Call("Node.JoinTableRPC", []interface{}{tableNames[i + 1], remoteDataSet}, &resultDataSet)
+					if resultDataSet.Schema.TableName != "" {
+						curDataSet = append(curDataSet, resultDataSet)
+					}
+				}
+			}
+		}
+		cachedDataSet = make([]Dataset, len(curDataSet))
+		copy(cachedDataSet, curDataSet)
+	}
+
+	replySchema := TableSchema{}
+	if len(cachedDataSet) > 0 {
+		replyTableName := ""
+		for i, tableName := range tableNames {
+			replyTableName = replyTableName + tableName
+			if i < len(tableNames) - 1 {
+				replyTableName = replyTableName + " + "
+			}
+		}
+		replyColumns := cachedDataSet[0].Schema.ColumnSchemas
+		replySchema = TableSchema{
+			replyTableName,
+			replyColumns,
+		}
+	}
+	(*reply).Schema = replySchema
+	for _, dataSet := range cachedDataSet {
+		(*reply).Rows = append((*reply).Rows, dataSet.Rows...)
+	}
 }
 
 func (c* Cluster) isNodeExists(nodeId string) bool {

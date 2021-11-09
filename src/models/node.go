@@ -91,6 +91,9 @@ func (n *Node) CreateTable(schema *TableSchema) error {
 func (n *Node) InsertRPC(args []interface{}, reply *string) {
 	tableName := args[0].(string)
 	row := args[1].(Row)
+	if n.predicates[tableName] == nil {
+		return
+	}
 
 	ok, err := n.PredicateCheck(tableName, &row)
 	if err != nil {
@@ -111,98 +114,120 @@ func (n *Node) InsertRPC(args []interface{}, reply *string) {
 
 // PredicateCheck checks whether a row is satisfied all predicates
 func (n *Node) PredicateCheck(tableName string, row *Row) (bool, error) {
-	if ps, ok := n.predicates[tableName]; ok {
-		schema := n.SchemaMap[tableName]
-		for _, p := range ps {
-			var lessFlag, equalFlag bool
-			columnId := schema.getColumnId(p.ColumnName)
-			// get comparison results based on data types
-			switch p.DataType {
-				case TypeInt32:
-					rowValue, err := row.getInt32Value(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = rowValue < p.Value.(int32)
-					equalFlag = rowValue == p.Value.(int32)
-					break
-				case TypeInt64:
-					rowValue, err := row.getInt64Value(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = rowValue < p.Value.(int64)
-					equalFlag = rowValue == p.Value.(int64)
-					break
-				case TypeFloat:
-					rowValue, err := row.getFloat32Value(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = rowValue < p.Value.(float32)
-					equalFlag = rowValue == p.Value.(float32)
-					break
-				case TypeDouble:
-					rowValue, err := row.getFloat64Value(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = rowValue < p.Value.(float64)
-					equalFlag = rowValue == p.Value.(float64)
-					break
-				case TypeBoolean:
-					rowValue, err := row.getBoolValue(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = false
-					equalFlag = rowValue == p.Value.(bool)
-					break
-				case TypeString:
-					rowValue, err := row.getStringValue(columnId)
-					if err != nil {
-						return false, err
-					}
-					lessFlag = rowValue < p.Value.(string)
-					equalFlag = rowValue == p.Value.(string)
-					break
-			}
-			// check predicates
-			switch p.Operator {
-				case "<":
-					if !lessFlag {
-						return false, nil
-					}
-					break
-				case "<=":
-					if !lessFlag && !equalFlag {
-						return false, nil
-					}
-					break
-				case "==":
-					if !(equalFlag) {
-						return false, nil
-					}
-					break
-				case ">":
-					if lessFlag || equalFlag {
-						return false, nil
-					}
-				case ">=":
-					if lessFlag {
-						return false, nil
-					}
-					break
-				case "!=":
-					if equalFlag {
-						return false, nil
-					}
-					break
-			}
+	ps := n.predicates[tableName]
+	schema := n.SchemaMap[tableName]
+	for _, p := range ps {
+		var lessFlag, equalFlag bool
+		columnId := schema.getColumnId(p.ColumnName)
+		// get comparison results based on data types
+		switch p.DataType {
+			case TypeInt32:
+				rowValue, err := row.getInt32Value(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getInt32Value()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = rowValue < pValue
+				equalFlag = rowValue == pValue
+				break
+			case TypeInt64:
+				rowValue, err := row.getInt64Value(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getInt64Value()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = rowValue < pValue
+				equalFlag = rowValue == pValue
+				break
+			case TypeFloat:
+				rowValue, err := row.getFloat32Value(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getFloat32Value()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = rowValue < pValue
+				equalFlag = rowValue == pValue
+				break
+			case TypeDouble:
+				rowValue, err := row.getFloat64Value(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getFloat64Value()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = rowValue < pValue
+				equalFlag = rowValue == pValue
+				break
+			case TypeBoolean:
+				rowValue, err := row.getBoolValue(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getBoolValue()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = false
+				equalFlag = rowValue == pValue
+				break
+			case TypeString:
+				rowValue, err := row.getStringValue(columnId)
+				if err != nil {
+					return false, err
+				}
+				pValue, err := p.getStringValue()
+				if err != nil {
+					return false, err
+				}
+				lessFlag = rowValue < pValue
+				equalFlag = rowValue == pValue
+				break
 		}
-	} else {
-		return false, errors.New("table already exists")
+		// check predicates
+		switch p.Operator {
+			case "<":
+				if !lessFlag {
+					return false, nil
+				}
+				break
+			case "<=":
+				if !lessFlag && !equalFlag {
+					return false, nil
+				}
+				break
+			case "==":
+				if !(equalFlag) {
+					return false, nil
+				}
+				break
+			case ">":
+				if lessFlag || equalFlag {
+					return false, nil
+				}
+			case ">=":
+				if lessFlag {
+					return false, nil
+				}
+				break
+			case "!=":
+				if equalFlag {
+					return false, nil
+				}
+				break
+		}
 	}
+
 	return true, nil
 }
 
@@ -270,4 +295,51 @@ func (n *Node) ScanTable(tableName string, dataset *Dataset) {
 		resultSet.Schema = *t.schema
 		*dataset = resultSet
 	}
+}
+
+func (n *Node) JoinTableRPC(args []interface{}, reply *Dataset) {
+	tableName := args[0].(string)
+	remoteDataSet := args[1].(Dataset)
+	localDataSet := Dataset{}
+	n.ScanTable(tableName, &localDataSet)
+
+	localId, remoteId := localDataSet.Schema.getForeignKey(remoteDataSet.Schema)
+	if localId == -1 {
+		(*reply).Schema = TableSchema{}
+		(*reply).Rows = []Row {}
+		return
+	}
+
+	replyColumns := make([]ColumnSchema, len(remoteDataSet.Schema.ColumnSchemas))
+	copy(replyColumns, remoteDataSet.Schema.ColumnSchemas)
+	for i, localColumn := range localDataSet.Schema.ColumnSchemas {
+		if i == localId {
+			continue
+		}
+		replyColumns = append(replyColumns, localColumn)
+	}
+
+	replySchema := TableSchema{
+		tableName + " + " + remoteDataSet.Schema.TableName,
+		replyColumns,
+	}
+
+	var replyRows []Row
+	for _, localRow := range localDataSet.Rows {
+		for _, remoteRow := range remoteDataSet.Rows {
+			if localRow[localId] == remoteRow[remoteId] {
+				replyRow := make(Row, len(remoteRow))
+				copy(replyRow, remoteRow)
+				for i, localColumnData := range localRow {
+					if i != localId {
+						replyRow = append(replyRow, localColumnData)
+					}
+				}
+				replyRows = append(replyRows, replyRow)
+			}
+		}
+	}
+
+	(*reply).Schema = replySchema
+	(*reply).Rows = replyRows
 }
