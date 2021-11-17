@@ -297,6 +297,7 @@ func (n *Node) ScanTable(tableName string, dataset *Dataset) {
 	}
 }
 
+// JoinTableRPC returns the result of specified local table natural join with remote table
 func (n *Node) JoinTableRPC(args []interface{}, reply *Dataset) {
 	tableName := args[0].(string)
 	remoteDataSet := args[1].(Dataset)

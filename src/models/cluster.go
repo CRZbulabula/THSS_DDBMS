@@ -107,22 +107,31 @@ func (c* Cluster) Join(tableNames []string, reply *Dataset) {
 
 	endNamePrefix := "InternalClient"
 
-	var cachedDataSet []Dataset
+	var cachedDataSets []Dataset
 	for i, tableName := range tableNames {
 		if i == len(tableNames) - 1 {
 			break
 		}
 
-		var curDataSet []Dataset
-		for _, remoteId := range c.nodeIds {
-			remoteEndName := endNamePrefix + remoteId
-			remoteEnd := c.network.MakeEnd(remoteEndName)
-			c.network.Connect(remoteEndName, remoteId)
-			c.network.Enable(remoteEndName, true)
+		var remoteDataSets []Dataset
+		if i == 0 {
+			for _, remoteId := range c.nodeIds {
+				remoteEndName := endNamePrefix + remoteId
+				remoteEnd := c.network.MakeEnd(remoteEndName)
+				c.network.Connect(remoteEndName, remoteId)
+				c.network.Enable(remoteEndName, true)
 
-			var remoteDataSet Dataset
-			remoteEnd.Call("Node.ScanTable", tableName, &remoteDataSet)
+				var remoteDataSet Dataset
+				remoteEnd.Call("Node.ScanTable", tableName, &remoteDataSet)
+				remoteDataSets = append(remoteDataSets, remoteDataSet)
+			}
+		} else {
+			remoteDataSets = make([]Dataset, len(cachedDataSets))
+			copy(remoteDataSets, cachedDataSets)
+		}
 
+		var curDataSets []Dataset
+		for _, remoteDataSet := range remoteDataSets {
 			if remoteDataSet.Rows != nil {
 				for _, localId := range  c.nodeIds {
 					localEndName := endNamePrefix + localId
@@ -133,17 +142,17 @@ func (c* Cluster) Join(tableNames []string, reply *Dataset) {
 					var resultDataSet Dataset
 					localEnd.Call("Node.JoinTableRPC", []interface{}{tableNames[i + 1], remoteDataSet}, &resultDataSet)
 					if resultDataSet.Schema.TableName != "" {
-						curDataSet = append(curDataSet, resultDataSet)
+						curDataSets = append(curDataSets, resultDataSet)
 					}
 				}
 			}
 		}
-		cachedDataSet = make([]Dataset, len(curDataSet))
-		copy(cachedDataSet, curDataSet)
+		cachedDataSets = make([]Dataset, len(curDataSets))
+		copy(cachedDataSets, curDataSets)
 	}
 
 	replySchema := TableSchema{}
-	if len(cachedDataSet) > 0 {
+	if len(cachedDataSets) > 0 {
 		replyTableName := ""
 		for i, tableName := range tableNames {
 			replyTableName = replyTableName + tableName
@@ -151,14 +160,16 @@ func (c* Cluster) Join(tableNames []string, reply *Dataset) {
 				replyTableName = replyTableName + " + "
 			}
 		}
-		replyColumns := cachedDataSet[0].Schema.ColumnSchemas
+		replyColumns := cachedDataSets[0].Schema.ColumnSchemas
 		replySchema = TableSchema{
 			replyTableName,
 			replyColumns,
 		}
 	}
+
+	// join over union
 	(*reply).Schema = replySchema
-	for _, dataSet := range cachedDataSet {
+	for _, dataSet := range cachedDataSets {
 		(*reply).Rows = append((*reply).Rows, dataSet.Rows...)
 	}
 }
