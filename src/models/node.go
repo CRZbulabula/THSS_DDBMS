@@ -91,6 +91,7 @@ func (n *Node) CreateTable(schema *TableSchema) error {
 func (n *Node) InsertRPC(args []interface{}, reply *string) {
 	tableName := args[0].(string)
 	row := args[1].(Row)
+	rowId := args[2].(int)
 	if n.predicates[tableName] == nil {
 		return
 	}
@@ -105,6 +106,7 @@ func (n *Node) InsertRPC(args []interface{}, reply *string) {
 		for _, columnId := range n.columnIdsMap[tableName] {
 			insertRow = append(insertRow, row[columnId])
 		}
+		insertRow = append(insertRow, rowId)
 		err = n.Insert(tableName, &insertRow)
 		if err != nil {
 			*reply = err.Error()
@@ -273,6 +275,68 @@ func (n *Node) count(tableName string) (int, error) {
 	}
 }
 
+func (n *Node) ScanTableWithRowIds(args []interface{}, dataSet *Dataset) {
+	tableName := args[0].(string)
+	rowIds := args[1].([]int)
+	if t, ok := n.TableMap[tableName]; ok {
+		var resultRows []Row
+		iterator := t.RowIterator()
+		loc := len(t.schema.ColumnSchemas)
+
+		rowsMap := make(map[int]Row)
+		for iterator.HasNext() {
+			curRow := *iterator.Next()
+			rowsMap[curRow[loc].(int)] = curRow
+		}
+		for _, id := range rowIds {
+			if rowsMap[id] != nil {
+				resultRows = append(resultRows, rowsMap[id])
+			}
+		}
+
+		(*dataSet).Schema = *(t.schema)
+		(*dataSet).Rows = resultRows
+	}
+}
+
+func (n *Node) ScanTableWithSchema(args []interface{}, dataset *Dataset) {
+	tableSchema := args[0].(TableSchema)
+	if t, ok := n.TableMap[tableSchema.TableName]; ok {
+		var resultColumns []ColumnSchema
+		var resultIds []int
+		for _, columnA := range tableSchema.ColumnSchemas {
+			for i, columnB := range t.schema.ColumnSchemas {
+				if columnA == columnB {
+					resultColumns = append(resultColumns, columnA)
+					resultIds = append(resultIds, i)
+				}
+			}
+		}
+		if len(resultIds) == 0 {
+			return
+		}
+		resultIds = append(resultIds, len(t.schema.ColumnSchemas))
+
+		var resultRows []Row
+		iterator := t.RowIterator()
+		for iterator.HasNext() {
+			curRow := *iterator.Next()
+			var row Row
+			for _, id := range resultIds {
+				row = append(row, curRow[id])
+			}
+
+			resultRows = append(resultRows, row)
+		}
+
+		(*dataset).Schema = TableSchema{
+			t.schema.TableName,
+			resultColumns,
+		}
+		(*dataset).Rows = resultRows
+	}
+}
+
 // ScanTable returns all rows in a table by the specified name or nothing if it does not exist.
 // This method is recommended only to be used for TEST PURPOSE, and try not to use this method in your implementation,
 // but you can use it in your own test cases.
@@ -287,7 +351,8 @@ func (n *Node) ScanTable(tableName string, dataset *Dataset) {
 		i := 0
 		iterator := t.RowIterator()
 		for iterator.HasNext() {
-			tableRows[i] = *iterator.Next()
+			curRow := *iterator.Next()
+			tableRows[i] = curRow[ : len(curRow) - 1]
 			i = i + 1
 		}
 
@@ -295,52 +360,4 @@ func (n *Node) ScanTable(tableName string, dataset *Dataset) {
 		resultSet.Schema = *t.schema
 		*dataset = resultSet
 	}
-}
-
-// JoinTableRPC returns the result of specified local table natural join with remote table
-func (n *Node) JoinTableRPC(args []interface{}, reply *Dataset) {
-	tableName := args[0].(string)
-	remoteDataSet := args[1].(Dataset)
-	localDataSet := Dataset{}
-	n.ScanTable(tableName, &localDataSet)
-
-	localId, remoteId := localDataSet.Schema.getForeignKey(remoteDataSet.Schema)
-	if localId == -1 {
-		(*reply).Schema = TableSchema{}
-		(*reply).Rows = []Row {}
-		return
-	}
-
-	replyColumns := make([]ColumnSchema, len(remoteDataSet.Schema.ColumnSchemas))
-	copy(replyColumns, remoteDataSet.Schema.ColumnSchemas)
-	for i, localColumn := range localDataSet.Schema.ColumnSchemas {
-		if i == localId {
-			continue
-		}
-		replyColumns = append(replyColumns, localColumn)
-	}
-
-	replySchema := TableSchema{
-		tableName + " + " + remoteDataSet.Schema.TableName,
-		replyColumns,
-	}
-
-	var replyRows []Row
-	for _, localRow := range localDataSet.Rows {
-		for _, remoteRow := range remoteDataSet.Rows {
-			if localRow[localId] == remoteRow[remoteId] {
-				replyRow := make(Row, len(remoteRow))
-				copy(replyRow, remoteRow)
-				for i, localColumnData := range localRow {
-					if i != localId {
-						replyRow = append(replyRow, localColumnData)
-					}
-				}
-				replyRows = append(replyRows, replyRow)
-			}
-		}
-	}
-
-	(*reply).Schema = replySchema
-	(*reply).Rows = replyRows
 }

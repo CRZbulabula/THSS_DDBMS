@@ -23,6 +23,9 @@ type Cluster struct {
 	network *labrpc.Network
 	// the Name of the cluster, also used as a network address of the cluster coordinator in the network above
 	Name string
+
+	tableSize map[string]int
+	tableSchemaMap map[string]TableSchema
 }
 
 // NewCluster creates a Cluster with the given number of nodes and register the nodes to the given network.
@@ -61,7 +64,13 @@ func NewCluster(nodeNum int, network *labrpc.Network, clusterName string) *Clust
 	}
 
 	// create a cluster with the nodes and the network
-	c := &Cluster{nodeIds: nodeIds, network: network, Name: clusterName}
+	c := &Cluster{
+		nodeIds: nodeIds,
+		network: network,
+		Name: clusterName,
+		tableSize: make(map[string]int),
+		tableSchemaMap: make(map[string]TableSchema),
+	}
 	// create a coordinator for the cluster to receive external requests, the steps are similar to those above.
 	// notice that we use the reference of the cluster as the name of the coordinator server,
 	// and the names can be more than strings.
@@ -100,78 +109,150 @@ func (c *Cluster) SayHello(visitor string, reply *string) {
 	*reply = fmt.Sprintf("Hello %s, I am the coordinator of %s", visitor, c.Name)
 }
 
+func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Dataset {
+	var remoteDataSets []Dataset
+	endNamePrefix := "InternalClient"
+	for _, remoteId := range c.nodeIds {
+		remoteEndName := endNamePrefix + remoteId
+		remoteEnd := c.network.MakeEnd(remoteEndName)
+		c.network.Connect(remoteEndName, remoteId)
+		c.network.Enable(remoteEndName, true)
+
+		var remoteDataSet Dataset
+		remoteEnd.Call("Node.ScanTableWithRowIds", []interface{}{tableSchema.TableName, rowIds}, &remoteDataSet)
+		if len(remoteDataSet.Rows) > 0 {
+			remoteDataSets = append(remoteDataSets, remoteDataSet)
+		}
+	}
+
+	var resultDataSet Dataset
+	resultDataSet.Schema = *tableSchema
+	for i, remoteDataSet := range remoteDataSets {
+		if len(remoteDataSet.Schema.ColumnSchemas) != len(tableSchema.ColumnSchemas) {
+			for j := i + 1; j < len(remoteDataSets); j++ {
+				remoteDataSet = remoteDataSet.getMergeDataSet(&remoteDataSets[j])
+			}
+			if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+				remoteDataSet.changeSchema(tableSchema)
+				remoteDataSets[i] = remoteDataSet
+			}
+		}
+	}
+
+	rowsMap := make(map[int]Row)
+	loc := len(tableSchema.ColumnSchemas)
+	for _, remoteDataSet := range remoteDataSets {
+		if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+			for _, row := range remoteDataSet.Rows {
+				rowsMap[row[loc].(int)] = row
+			}
+		}
+	}
+
+	var resultRows []Row
+	for _, rowId := range rowIds {
+		resultRows = append(resultRows, rowsMap[rowId])
+	}
+	resultDataSet.Rows = resultRows
+	return resultDataSet
+}
+
+func (c* Cluster) ScanTableWithSchema(tableSchema *TableSchema) Dataset {
+	var remoteDataSets []Dataset
+	endNamePrefix := "InternalClient"
+	for _, remoteId := range c.nodeIds {
+		remoteEndName := endNamePrefix + remoteId
+		remoteEnd := c.network.MakeEnd(remoteEndName)
+		c.network.Connect(remoteEndName, remoteId)
+		c.network.Enable(remoteEndName, true)
+
+		var remoteDataSet Dataset
+		remoteEnd.Call("Node.ScanTableWithSchema", []interface{}{*tableSchema}, &remoteDataSet)
+		if len(remoteDataSet.Rows) > 0 {
+			remoteDataSets = append(remoteDataSets, remoteDataSet)
+		}
+	}
+
+	var resultDataSet Dataset
+	resultDataSet.Schema = *tableSchema
+	for i, remoteDataSet := range remoteDataSets {
+		if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+			resultDataSet.Rows = append(resultDataSet.Rows, remoteDataSet.Rows...)
+		} else {
+			for j := i + 1; j < len(remoteDataSets); j++ {
+				remoteDataSet = remoteDataSet.getMergeDataSet(&remoteDataSets[j])
+			}
+			if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+				remoteDataSet.changeSchema(tableSchema)
+				resultDataSet.Rows = append(resultDataSet.Rows, remoteDataSet.Rows...)
+			}
+		}
+	}
+	resultDataSet.sortRows()
+	return resultDataSet
+}
+
 // Join all tables in the given list using NATURAL JOIN (join on the common columns), and return the joined result
 // as a list of rows and set it to reply.
 func (c* Cluster) Join(tableNames []string, reply *Dataset) {
 	labgob.Register(Dataset{})
-
-	endNamePrefix := "InternalClient"
-
-	var cachedDataSets []Dataset
-	for i, tableName := range tableNames {
+	var cacheDataSet Dataset
+	for i := range tableNames {
 		if i == len(tableNames) - 1 {
 			break
 		}
 
-		var remoteDataSets []Dataset
+		var remoteDataSet Dataset
+		var localDataSet Dataset
+		remoteSchema := c.tableSchemaMap[tableNames[i]]
+		localSchema := c.tableSchemaMap[tableNames[i + 1]]
 		if i == 0 {
-			for _, remoteId := range c.nodeIds {
-				remoteEndName := endNamePrefix + remoteId
-				remoteEnd := c.network.MakeEnd(remoteEndName)
-				c.network.Connect(remoteEndName, remoteId)
-				c.network.Enable(remoteEndName, true)
-
-				var remoteDataSet Dataset
-				remoteEnd.Call("Node.ScanTable", tableName, &remoteDataSet)
-				remoteDataSets = append(remoteDataSets, remoteDataSet)
+			localIds, remoteIds := localSchema.getForeignKeys(remoteSchema)
+			if localIds != nil {
+				remoteSubSchema := remoteSchema.getSubSchema(remoteIds)
+				localSubSchema := localSchema.getSubSchema(localIds)
+				remoteDataSet = c.ScanTableWithSchema(&remoteSubSchema)
+				localDataSet = c.ScanTableWithSchema(&localSubSchema)
 			}
 		} else {
-			remoteDataSets = make([]Dataset, len(cachedDataSets))
-			copy(remoteDataSets, cachedDataSets)
+			localIds, remoteIds := localSchema.getForeignKeys(cacheDataSet.Schema)
+			if localIds != nil {
+				remoteDataSet = cacheDataSet.getSubColumnDataSet(remoteIds)
+				localSubSchema := localSchema.getSubSchema(localIds)
+				localDataSet = c.ScanTableWithSchema(&localSubSchema)
+			}
 		}
 
-		var curDataSets []Dataset
-		for _, remoteDataSet := range remoteDataSets {
-			if remoteDataSet.Rows != nil {
-				for _, localId := range  c.nodeIds {
-					localEndName := endNamePrefix + localId
-					localEnd := c.network.MakeEnd(localEndName)
-					c.network.Connect(localEndName, localId)
-					c.network.Enable(localEndName, true)
-
-					var resultDataSet Dataset
-					localEnd.Call("Node.JoinTableRPC", []interface{}{tableNames[i + 1], remoteDataSet}, &resultDataSet)
-					if resultDataSet.Schema.TableName != "" {
-						curDataSets = append(curDataSets, resultDataSet)
+		// semi-join
+		var remoteRowIds []int
+		var localRowIds []int
+		for _, rowA := range remoteDataSet.Rows {
+			for _, rowB := range localDataSet.Rows {
+				ok := true
+				for j := 0; j < len(rowA) - 1; j++ {
+					if rowA[j] != rowB[j] {
+						ok = false
+						break
 					}
+				}
+				if ok {
+					remoteRowIds = append(remoteRowIds, rowA[len(rowA) - 1].(int))
+					localRowIds = append(localRowIds, rowB[len(rowB) - 1].(int))
 				}
 			}
 		}
-		cachedDataSets = make([]Dataset, len(curDataSets))
-		copy(cachedDataSets, curDataSets)
+
+		if i == 0 {
+			cacheDataSet = c.ScanTableWithRowIds(&remoteSchema, remoteRowIds)
+		} else {
+			cacheDataSet = cacheDataSet.getSubRowDataSet(remoteRowIds)
+		}
+		localDataSet = c.ScanTableWithRowIds(&localSchema, localRowIds)
+
+		cacheDataSet = cacheDataSet.getUnionDataSet(&localDataSet)
 	}
 
-	replySchema := TableSchema{}
-	if len(cachedDataSets) > 0 {
-		replyTableName := ""
-		for i, tableName := range tableNames {
-			replyTableName = replyTableName + tableName
-			if i < len(tableNames) - 1 {
-				replyTableName = replyTableName + " + "
-			}
-		}
-		replyColumns := cachedDataSets[0].Schema.ColumnSchemas
-		replySchema = TableSchema{
-			replyTableName,
-			replyColumns,
-		}
-	}
-
-	// join over union
-	(*reply).Schema = replySchema
-	for _, dataSet := range cachedDataSets {
-		(*reply).Rows = append((*reply).Rows, dataSet.Rows...)
-	}
+	*reply = cacheDataSet
 }
 
 func (c* Cluster) isNodeExists(nodeId string) bool {
@@ -196,6 +277,8 @@ func (c* Cluster) BuildTable(params []interface{}, reply *string) {
 		*reply = "Build table error: Cannot cast params[1] to json!"
 		return
 	}
+	c.tableSize[schema.TableName] = 0
+	c.tableSchemaMap[schema.TableName] = schema
 
 	endNamePrefix := "InternalClient"
 	nodeNamePrefix := "Node"
@@ -261,6 +344,8 @@ func (c* Cluster) BuildTable(params []interface{}, reply *string) {
 func (c* Cluster) FragmentWrite(params []interface{}, reply *string) {
 	tableName := params[0].(string)
 	row := params[1].(Row)
+	rowId := c.tableSize[tableName]
+	c.tableSize[tableName] += 1
 
 	endNamePrefix := "InternalClient"
 	for _, nodeId := range c.nodeIds {
@@ -269,7 +354,7 @@ func (c* Cluster) FragmentWrite(params []interface{}, reply *string) {
 		c.network.Connect(endName, nodeId)
 		c.network.Enable(endName, true)
 
-		end.Call("Node.InsertRPC", []interface{}{tableName, row}, &reply)
+		end.Call("Node.InsertRPC", []interface{}{tableName, row, rowId}, &reply)
 		if *reply != "" {
 			return
 		}

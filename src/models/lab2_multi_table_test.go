@@ -170,7 +170,7 @@ func setupCli() {
 	// set up a network and a cluster
 	clusterName := "MyCluster"
 	network = labrpc.MakeNetwork()
-	c = NewCluster(3, network, clusterName)
+	c = NewCluster(4, network, clusterName)
 
 	// create a client and connect to the cluster
 	clientName := "ClientA"
@@ -188,23 +188,51 @@ func TestLab2MultiTableJoin(t *testing.T) {
 	m := map[string]interface{}{
 		"0": map[string]interface{}{
 			"predicate": map[string]interface{}{
-				"grade": [...]map[string]interface{}{{
-					"op":  "<=",
-					"val": 3.6,
-				},
-				},
+				"sid": [...]map[string]interface{}{{
+					"op": "<=",
+					"val": 6,
+				}},
 			},
 			"column": [...]string{
-				"sid", "sname", "age", "grade",
+				"sid", "sname",
 			},
 		},
 		"1": map[string]interface{}{
 			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": "<=",
+					"val": 6,
+				}},
 				"grade": [...]map[string]interface{}{{
-					"op":  ">",
-					"val": 3.6,
-				},
-				},
+					"op":  "<",
+					"val": 4.0,
+				}},
+			},
+			"column": [...]string{
+				"age", "grade",
+			},
+		},
+		"2": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": "<=",
+					"val": 6,
+				}},
+				"grade": [...]map[string]interface{}{{
+					"op":  "==",
+					"val": 4.0,
+				}},
+			},
+			"column": [...]string{
+				"age", "grade",
+			},
+		},
+		"3": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": ">",
+					"val": 6,
+				}},
 			},
 			"column": [...]string{
 				"sid", "sname", "age", "grade",

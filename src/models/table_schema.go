@@ -24,13 +24,53 @@ func (ts* TableSchema) getDataType(columnName string) int {
 	return -1
 }
 
-func (ts* TableSchema) getForeignKey(joinSchema TableSchema) (int, int) {
+func (ts* TableSchema) getForeignKeys(joinSchema TableSchema) ([]int, []int) {
+	var localIds []int
+	var remoteIds []int
 	for i, columnI := range ts.ColumnSchemas {
 		for j, columnJ := range joinSchema.ColumnSchemas {
 			if columnI.Name == columnJ.Name {
-				return i, j
+				localIds = append(localIds, i)
+				remoteIds = append(remoteIds, j)
 			}
 		}
 	}
-	return -1, -1
+	if len(localIds) > 0 {
+		return localIds, remoteIds
+	} else {
+		return nil, nil
+	}
+}
+
+func (ts* TableSchema) getSubSchema(columnIds []int) TableSchema {
+	var columns []ColumnSchema
+	for _, columnId := range columnIds {
+		columns = append(columns, ts.ColumnSchemas[columnId])
+	}
+	return TableSchema{
+		ts.TableName,
+		columns,
+	}
+}
+
+func (ts* TableSchema) getMergeSchema(other *TableSchema) (TableSchema, []bool) {
+	mergeColumns := make([]ColumnSchema, len(ts.ColumnSchemas))
+	copy(mergeColumns, ts.ColumnSchemas)
+	okList := make([]bool, len(other.ColumnSchemas))
+	for i, columnA := range other.ColumnSchemas {
+		okList[i] = true
+		for _, columnB := range ts.ColumnSchemas {
+			if columnA == columnB {
+				okList[i] = false
+				break
+			}
+		}
+		if okList[i] {
+			mergeColumns = append(mergeColumns, columnA)
+		}
+	}
+	return TableSchema{
+		ts.TableName,
+		mergeColumns,
+	}, okList
 }
