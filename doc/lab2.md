@@ -18,5 +18,9 @@ Join 使用 `semi-join` 算法执行，master 节点先计算出两表的外键�
 ### 多表连接
 多表连接的测试代码见文件 `lab2_multi_table_test.go`。
 
+测试文件将表 `student` 进行混合分区，以验证 DDBMS 的鲁棒性
+
 ### 多外键连接
 多外键连接的测试代码间文件 `lab2_multi_foreignKey_test.go`。
+
+测试文件将两张表的每一列都存在不同分区，以验证 DDBMS 的鲁棒性
