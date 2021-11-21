@@ -109,6 +109,7 @@ func (c *Cluster) SayHello(visitor string, reply *string) {
 	*reply = fmt.Sprintf("Hello %s, I am the coordinator of %s", visitor, c.Name)
 }
 
+// ScanTableWithRowIds get table data with specified row ids
 func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Dataset {
 	var remoteDataSets []Dataset
 	endNamePrefix := "InternalClient"
@@ -157,6 +158,7 @@ func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Da
 	return resultDataSet
 }
 
+// ScanTableWithSchema get table data with specified columns
 func (c* Cluster) ScanTableWithSchema(tableSchema *TableSchema) Dataset {
 	var remoteDataSets []Dataset
 	endNamePrefix := "InternalClient"

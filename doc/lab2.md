@@ -12,16 +12,11 @@
 ### Cluster.Join
 Cluster.Join 依据表的输入顺序，自左向右依次进行 Join。
 
-### Node.JoinTableRPC
-Node.JoinTableRPC 需要传入两个参数：需要 Join 的本地表的名称；远端传来的数据集。
-
-Node.JoinTableRPC 首先提取 传入Schema 和 本地Schema 的 ForeignKey，然后会使用 ForeignKey 完成 Join 操作。
+Join 使用 `semi-join` 算法执行，master 节点先计算出两表的外键，随后提取出两表的外键和行号计算 Join，最后将得到的行号用于提取原数据并组合。
 
 ## 附加功能
-### join over union
-每对发生 Join 的 Slave Node 会产生一个数据集，Cluster.Join 不会在两张表的 Join 操作后马上合并这些数据集，而是先将结果缓存在内存，等待所有 Join 操作完成后才执行合并。
-
 ### 多表连接
-Cluster.Join 执行时，首先 Join 第一张表和第二张表，得到一系列结果集。接着使用得到的每个结果集依次 Join 每个 Slave Node 中保存的下一张表。
-
 多表连接的测试代码见文件 `lab2_multi_table_test.go`。
+
+### 多外键连接
+多外键连接的测试代码间文件 `lab2_multi_foreignKey_test.go`。
