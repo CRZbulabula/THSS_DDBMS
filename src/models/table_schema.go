@@ -6,6 +6,22 @@ type TableSchema struct {
 	ColumnSchemas []ColumnSchema
 }
 
+func (ts* TableSchema) equals(other *TableSchema) bool {
+	for _, c1 := range ts.ColumnSchemas {
+		match := false
+		for _, c2 := range other.ColumnSchemas {
+			if c1.equals(&c2) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	return true
+}
+
 func (ts* TableSchema) getColumnId(columnName string) int {
 	for columnId, columnSchema := range ts.ColumnSchemas {
 		if columnName == columnSchema.Name {

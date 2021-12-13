@@ -12,6 +12,27 @@ type Predicate struct {
 	Value    interface{}
 }
 
+func (p *Predicate) equals(other *Predicate) bool {
+	return p.ColumnName == other.ColumnName && p.Operator == other.Operator &&
+		p.DataType == other.DataType && p.Value == other.Value
+}
+
+func isPredicatesEqual(pa []Predicate, pb []Predicate) bool {
+	for _, p1 := range pa {
+		existEqual := false
+		for _, p2 := range pb {
+			if p1.equals(&p2) {
+				existEqual = true
+				break
+			}
+		}
+		if !existEqual {
+			return false
+		}
+	}
+	return true
+}
+
 // Predicate getters
 func (p *Predicate) getInt32Value() (int32, error) {
 	switch p.Value.(type) {

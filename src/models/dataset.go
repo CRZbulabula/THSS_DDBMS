@@ -92,6 +92,14 @@ func (d *Dataset) sortRows() {
 	sort.SliceStable(d.Rows, func(i, j int) bool {
 		return d.Rows[i][loc].(int) < d.Rows[j][loc].(int)
 	})
+
+	var deduplicatedRows []Row
+	for _, row := range d.Rows {
+		if len(deduplicatedRows) == 0 || row[loc].(int) > deduplicatedRows[len(deduplicatedRows) - 1][loc].(int) {
+			deduplicatedRows = append(deduplicatedRows, row)
+		}
+	}
+	d.Rows = deduplicatedRows
 }
 
 func (d *Dataset) changeSchema(schema *TableSchema) {

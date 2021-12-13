@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Cluster consists of a group of nodes to manage distributed tables defined in models/table.go.
@@ -284,59 +285,62 @@ func (c* Cluster) BuildTable(params []interface{}, reply *string) {
 
 	endNamePrefix := "InternalClient"
 	nodeNamePrefix := "Node"
-	for nodeId, reluMap := range rules {
-		if !c.isNodeExists(nodeNamePrefix + nodeId) {
-			*reply = "Build table error: Node doesn't exist!"
-			return
-		}
-		rule, ruleErr := reluMap.(map[string]interface{})
-		if ruleErr != true {
-			*reply = "Build table error: Cannot cast rule in param[1]!"
-			return
-		}
-
-		endName := endNamePrefix + nodeNamePrefix + nodeId
-		end := c.network.MakeEnd(endName)
-		c.network.Connect(endName, nodeNamePrefix + nodeId)
-		c.network.Enable(endName, true)
-
-		var columnSchemas []ColumnSchema
-		var columnIds []int
-		for _, columnName := range rule["column"].([]interface{}) {
-			var dataType = schema.getDataType(columnName.(string))
-			var columnId = schema.getColumnId(columnName.(string))
-			if dataType == -1 {
-				*reply = "Build table error: Unknown ColumnName name!"
+	for nodeIds, reluMap := range rules {
+		nodeIdList := strings.Split(nodeIds, "|")
+		for _, nodeId := range nodeIdList {
+			if !c.isNodeExists(nodeNamePrefix + nodeId) {
+				*reply = "Build table error: Node doesn't exist!"
 				return
 			}
-			var columnSchema = ColumnSchema{
-				columnName.(string),
-				dataType,
+			rule, ruleErr := reluMap.(map[string]interface{})
+			if ruleErr != true {
+				*reply = "Build table error: Cannot cast rule in param[1]!"
+				return
 			}
-			columnSchemas = append(columnSchemas, columnSchema)
-			columnIds = append(columnIds, columnId)
-		}
-		tableSchema := TableSchema{
-			TableName: schema.TableName,
-			ColumnSchemas: columnSchemas,
-		}
-		var ps []Predicate
-		for columnName, predicates := range rule["predicate"].(map[string]interface{}) {
-			for _, predicate := range predicates.([]interface{}) {
 
-				var p = Predicate{
-					columnName,
-					predicate.(map[string]interface{})["op"].(string),
-					schema.getDataType(columnName),
-					predicate.(map[string]interface{})["val"],
+			endName := endNamePrefix + nodeNamePrefix + nodeId
+			end := c.network.MakeEnd(endName)
+			c.network.Connect(endName, nodeNamePrefix + nodeId)
+			c.network.Enable(endName, true)
+
+			var columnSchemas []ColumnSchema
+			var columnIds []int
+			for _, columnName := range rule["column"].([]interface{}) {
+				var dataType = schema.getDataType(columnName.(string))
+				var columnId = schema.getColumnId(columnName.(string))
+				if dataType == -1 {
+					*reply = "Build table error: Unknown ColumnName name!"
+					return
 				}
-				ps = append(ps, p)
+				var columnSchema = ColumnSchema{
+					columnName.(string),
+					dataType,
+				}
+				columnSchemas = append(columnSchemas, columnSchema)
+				columnIds = append(columnIds, columnId)
 			}
-		}
+			tableSchema := TableSchema{
+				TableName: schema.TableName,
+				ColumnSchemas: columnSchemas,
+			}
+			var ps []Predicate
+			for columnName, predicates := range rule["predicate"].(map[string]interface{}) {
+				for _, predicate := range predicates.([]interface{}) {
 
-		end.Call("Node.CreateTableRPC", []interface{}{tableSchema, columnIds, ps, schema}, reply)
-		if *reply != "" {
-			return
+					var p = Predicate{
+						columnName,
+						predicate.(map[string]interface{})["op"].(string),
+						schema.getDataType(columnName),
+						predicate.(map[string]interface{})["val"],
+					}
+					ps = append(ps, p)
+				}
+			}
+
+			end.Call("Node.CreateTableRPC", []interface{}{tableSchema, columnIds, ps, schema}, reply)
+			if *reply != "" {
+				return
+			}
 		}
  	}
 

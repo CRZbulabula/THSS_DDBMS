@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 // Node manages some tables defined in models/table.go
@@ -59,6 +60,25 @@ func (n *Node) CreateTableRPC(args []interface{}, reply *string) {
 		*reply = "Create table error: Cannot cast params[1] to type []Predicate!"
 	}
 
+	// check if table partition already exists
+	tableExists := false
+	for tableCount := 0; ; tableCount++ {
+		if table, ok := n.TableMap[schema.TableName + "-" + strconv.Itoa(tableCount)]; ok {
+			if table.schema.equals(&schema) {
+				if isPredicatesEqual(n.predicates[table.schema.TableName], predicates) {
+					tableExists = true
+					break
+				}
+			}
+		} else {
+			schema.TableName = schema.TableName + "-" + strconv.Itoa(tableCount)
+			break
+		}
+	}
+	if tableExists {
+		return
+	}
+
 	err := n.CreateTable(&schema)
 	if err != nil {
 		*reply = err.Error()
@@ -92,26 +112,31 @@ func (n *Node) InsertRPC(args []interface{}, reply *string) {
 	tableName := args[0].(string)
 	row := args[1].(Row)
 	rowId := args[2].(int)
-	if n.predicates[tableName] == nil {
-		return
-	}
 
-	ok, err := n.PredicateCheck(tableName, &row)
-	if err != nil {
-		*reply = err.Error()
-		return
-	}
-	if ok {
-		var insertRow Row
-		for _, columnId := range n.columnIdsMap[tableName] {
-			insertRow = append(insertRow, row[columnId])
+	for tableCount := 0; ; tableCount++ {
+		pTableName := tableName + "-" + strconv.Itoa(tableCount)
+		if n.predicates[pTableName] == nil {
+			return
 		}
-		insertRow = append(insertRow, rowId)
-		err = n.Insert(tableName, &insertRow)
+
+		ok, err := n.PredicateCheck(pTableName, &row)
 		if err != nil {
 			*reply = err.Error()
+			return
+		}
+		if ok {
+			var insertRow Row
+			for _, columnId := range n.columnIdsMap[pTableName] {
+				insertRow = append(insertRow, row[columnId])
+			}
+			insertRow = append(insertRow, rowId)
+			err = n.Insert(pTableName, &insertRow)
+			if err != nil {
+				*reply = err.Error()
+			}
 		}
 	}
+
 }
 
 // PredicateCheck checks whether a row is satisfied all predicates
@@ -278,62 +303,72 @@ func (n *Node) count(tableName string) (int, error) {
 func (n *Node) ScanTableWithRowIds(args []interface{}, dataSet *Dataset) {
 	tableName := args[0].(string)
 	rowIds := args[1].([]int)
-	if t, ok := n.TableMap[tableName]; ok {
-		var resultRows []Row
-		iterator := t.RowIterator()
-		loc := len(t.schema.ColumnSchemas)
+	for tableCount := 0; ; tableCount++ {
+		pTableName := tableName + "-" + strconv.Itoa(tableCount)
+		if t, ok := n.TableMap[pTableName]; ok {
+			var resultRows []Row
+			iterator := t.RowIterator()
+			loc := len(t.schema.ColumnSchemas)
 
-		rowsMap := make(map[int]Row)
-		for iterator.HasNext() {
-			curRow := *iterator.Next()
-			rowsMap[curRow[loc].(int)] = curRow
-		}
-		for _, id := range rowIds {
-			if rowsMap[id] != nil {
-				resultRows = append(resultRows, rowsMap[id])
+			rowsMap := make(map[int]Row)
+			for iterator.HasNext() {
+				curRow := *iterator.Next()
+				rowsMap[curRow[loc].(int)] = curRow
 			}
-		}
+			for _, id := range rowIds {
+				if rowsMap[id] != nil {
+					resultRows = append(resultRows, rowsMap[id])
+				}
+			}
 
-		(*dataSet).Schema = *(t.schema)
-		(*dataSet).Rows = resultRows
+			(*dataSet).Schema = *(t.schema)
+			(*dataSet).Rows = resultRows
+		} else {
+			break
+		}
 	}
 }
 
 func (n *Node) ScanTableWithSchema(args []interface{}, dataset *Dataset) {
 	tableSchema := args[0].(TableSchema)
-	if t, ok := n.TableMap[tableSchema.TableName]; ok {
-		var resultColumns []ColumnSchema
-		var resultIds []int
-		for _, columnA := range tableSchema.ColumnSchemas {
-			for i, columnB := range t.schema.ColumnSchemas {
-				if columnA == columnB {
-					resultColumns = append(resultColumns, columnA)
-					resultIds = append(resultIds, i)
+	for tableCount := 0; ; tableCount++ {
+		pTableName := tableSchema.TableName + "-" + strconv.Itoa(tableCount)
+		if t, ok := n.TableMap[pTableName]; ok {
+			var resultColumns []ColumnSchema
+			var resultIds []int
+			for _, columnA := range tableSchema.ColumnSchemas {
+				for i, columnB := range t.schema.ColumnSchemas {
+					if columnA == columnB {
+						resultColumns = append(resultColumns, columnA)
+						resultIds = append(resultIds, i)
+					}
 				}
 			}
-		}
-		if len(resultIds) == 0 {
-			return
-		}
-		resultIds = append(resultIds, len(t.schema.ColumnSchemas))
+			if len(resultIds) == 0 {
+				return
+			}
+			resultIds = append(resultIds, len(t.schema.ColumnSchemas))
 
-		var resultRows []Row
-		iterator := t.RowIterator()
-		for iterator.HasNext() {
-			curRow := *iterator.Next()
-			var row Row
-			for _, id := range resultIds {
-				row = append(row, curRow[id])
+			var resultRows []Row
+			iterator := t.RowIterator()
+			for iterator.HasNext() {
+				curRow := *iterator.Next()
+				var row Row
+				for _, id := range resultIds {
+					row = append(row, curRow[id])
+				}
+
+				resultRows = append(resultRows, row)
 			}
 
-			resultRows = append(resultRows, row)
+			(*dataset).Schema = TableSchema{
+				t.schema.TableName,
+				resultColumns,
+			}
+			(*dataset).Rows = resultRows
+		} else {
+			break
 		}
-
-		(*dataset).Schema = TableSchema{
-			t.schema.TableName,
-			resultColumns,
-		}
-		(*dataset).Rows = resultRows
 	}
 }
 
@@ -344,20 +379,25 @@ func (n *Node) ScanTableWithSchema(args []interface{}, dataset *Dataset) {
 // table through network all at once, so sending a whole table in one RPC is very impractical. One recommended way is to
 // fetch a batch of Rows a time.
 func (n *Node) ScanTable(tableName string, dataset *Dataset) {
-	if t, ok := n.TableMap[tableName]; ok {
-		resultSet := Dataset{}
+	for tableCount := 0; ; tableCount++ {
+		pTableName := tableName + "-" + strconv.Itoa(tableCount)
+		if t, ok := n.TableMap[pTableName]; ok {
+			resultSet := Dataset{}
 
-		tableRows := make([]Row, t.Count())
-		i := 0
-		iterator := t.RowIterator()
-		for iterator.HasNext() {
-			curRow := *iterator.Next()
-			tableRows[i] = curRow[ : len(curRow) - 1]
-			i = i + 1
+			tableRows := make([]Row, t.Count())
+			i := 0
+			iterator := t.RowIterator()
+			for iterator.HasNext() {
+				curRow := *iterator.Next()
+				tableRows[i] = curRow[ : len(curRow) - 1]
+				i = i + 1
+			}
+
+			resultSet.Rows = tableRows
+			resultSet.Schema = *t.schema
+			*dataset = resultSet
+		} else {
+			break
 		}
-
-		resultSet.Rows = tableRows
-		resultSet.Schema = *t.schema
-		*dataset = resultSet
 	}
 }
