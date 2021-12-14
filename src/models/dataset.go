@@ -109,10 +109,11 @@ func (d *Dataset) changeSchema(schema *TableSchema) {
 		for j, columnB := range d.Schema.ColumnSchemas {
 			if columnA == columnB {
 				columnIds = append(columnIds, j)
+				break
 			}
 		}
 	}
-	for i := range columnIds {
+	for _, i := range columnIds {
 		if i != columnIds[i] {
 			ok = false
 			break
@@ -120,6 +121,7 @@ func (d *Dataset) changeSchema(schema *TableSchema) {
 	}
 
 	if !ok {
+		d.Schema.ColumnSchemas = schema.ColumnSchemas
 		for i, row := range d.Rows {
 			var newRow Row
 			for _, id := range columnIds {

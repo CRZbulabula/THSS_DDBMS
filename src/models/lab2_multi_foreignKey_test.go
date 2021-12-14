@@ -179,6 +179,77 @@ func TestLab2MultiForeignKeyTableJoin(t *testing.T) {
 	}
 }
 
+func TestLab3MultiForeignKeyTableJoin(t *testing.T) {
+	stSetupCli()
+	stDefineTables()
+
+	m := map[string]interface{}{
+		"0|1": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": ">=",
+					"val": 0,
+				}},
+			},
+			"column": [...]string{
+				"sid",
+			},
+		},
+		"0": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": ">=",
+					"val": 0,
+				}},
+			},
+			"column": [...]string{
+				"tid", "sname",
+			},
+		},
+	}
+	stTablePartitionRules, _ = json.Marshal(m)
+
+	m = map[string]interface{}{
+		"1|2": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": ">=",
+					"val": 0,
+				}},
+			},
+			"column": [...]string{
+				"tname", "tid",
+			},
+		},
+		"2": map[string]interface{}{
+			"predicate": map[string]interface{}{
+				"sid": [...]map[string]interface{}{{
+					"op": ">=",
+					"val": 0,
+				}},
+			},
+			"column": [...]string{
+				"sid",
+			},
+		},
+	}
+	tsTablePartitionRules, _ = json.Marshal(m)
+
+	stBuildTables(cli)
+	stInsertData(cli)
+
+	// perform a join and check the result
+	results := Dataset{}
+	cli.Call("Cluster.Join", []string{stTableName, tsTableName}, &results)
+	expectedDataset := Dataset{
+		Schema: stJoinedTableSchema,
+		Rows: stJoinedTableContent,
+	}
+	if !compareDataset(expectedDataset, results) {
+		t.Errorf("Incorrect join results, expected %v, actual %v", expectedDataset, results)
+	}
+}
+
 func stBuildTables(cli *labrpc.ClientEnd)  {
 	replyMsg := ""
 	cli.Call("Cluster.BuildTable", []interface{}{stTableSchema, stTablePartitionRules}, &replyMsg)

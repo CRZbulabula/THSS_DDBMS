@@ -64,11 +64,24 @@ func (n *Node) CreateTableRPC(args []interface{}, reply *string) {
 	tableExists := false
 	for tableCount := 0; ; tableCount++ {
 		if table, ok := n.TableMap[schema.TableName + "-" + strconv.Itoa(tableCount)]; ok {
-			if table.schema.equals(&schema) {
-				if isPredicatesEqual(n.predicates[table.schema.TableName], predicates) {
-					tableExists = true
-					break
+			schemaEqual := table.schema.equals(&schema)
+			predicateEqual := isPredicatesEqual(n.predicates[table.schema.TableName], predicates)
+			if schemaEqual && predicateEqual {
+				tableExists = true
+				break
+			} else if !schemaEqual && predicateEqual {
+				// merge schema
+				mergedSchema, okList := table.schema.getMergeSchema(&schema)
+				mergedSchema.TableName = schema.TableName + "-" + strconv.Itoa(tableCount)
+				table.schema = &mergedSchema
+				for i, ok2 := range okList {
+					if ok2 {
+						n.columnIdsMap[mergedSchema.TableName] = append(n.columnIdsMap[mergedSchema.TableName], columnIds[i])
+					}
 				}
+
+				tableExists = true
+				break
 			}
 		} else {
 			schema.TableName = schema.TableName + "-" + strconv.Itoa(tableCount)
@@ -300,36 +313,40 @@ func (n *Node) count(tableName string) (int, error) {
 	}
 }
 
-func (n *Node) ScanTableWithRowIds(args []interface{}, dataSet *Dataset) {
+func (n *Node) ScanTableWithRowIds(args []interface{}, datasets *[]Dataset) {
 	tableName := args[0].(string)
 	rowIds := args[1].([]int)
+
 	for tableCount := 0; ; tableCount++ {
 		pTableName := tableName + "-" + strconv.Itoa(tableCount)
 		if t, ok := n.TableMap[pTableName]; ok {
-			var resultRows []Row
 			iterator := t.RowIterator()
 			loc := len(t.schema.ColumnSchemas)
-
 			rowsMap := make(map[int]Row)
+
 			for iterator.HasNext() {
 				curRow := *iterator.Next()
 				rowsMap[curRow[loc].(int)] = curRow
 			}
+
+			var resultRows []Row
 			for _, id := range rowIds {
 				if rowsMap[id] != nil {
 					resultRows = append(resultRows, rowsMap[id])
 				}
 			}
-
-			(*dataSet).Schema = *(t.schema)
-			(*dataSet).Rows = resultRows
+			*datasets = append(*datasets, Dataset{
+				*t.schema,
+				resultRows,
+			})
 		} else {
 			break
 		}
 	}
+
 }
 
-func (n *Node) ScanTableWithSchema(args []interface{}, dataset *Dataset) {
+func (n *Node) ScanTableWithSchema(args []interface{}, datasets *[]Dataset) {
 	tableSchema := args[0].(TableSchema)
 	for tableCount := 0; ; tableCount++ {
 		pTableName := tableSchema.TableName + "-" + strconv.Itoa(tableCount)
@@ -361,11 +378,13 @@ func (n *Node) ScanTableWithSchema(args []interface{}, dataset *Dataset) {
 				resultRows = append(resultRows, row)
 			}
 
-			(*dataset).Schema = TableSchema{
-				t.schema.TableName,
-				resultColumns,
-			}
-			(*dataset).Rows = resultRows
+			*datasets = append(*datasets, Dataset{
+				TableSchema{
+					t.schema.TableName,
+					resultColumns,
+				},
+				resultRows,
+			})
 		} else {
 			break
 		}

@@ -120,10 +120,12 @@ func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Da
 		c.network.Connect(remoteEndName, remoteId)
 		c.network.Enable(remoteEndName, true)
 
-		var remoteDataSet Dataset
-		remoteEnd.Call("Node.ScanTableWithRowIds", []interface{}{tableSchema.TableName, rowIds}, &remoteDataSet)
-		if len(remoteDataSet.Rows) > 0 {
-			remoteDataSets = append(remoteDataSets, remoteDataSet)
+		var datasets []Dataset
+		remoteEnd.Call("Node.ScanTableWithRowIds", []interface{}{tableSchema.TableName, rowIds}, &datasets)
+		for _, dataset := range datasets {
+			if len(dataset.Rows) > 0 {
+				remoteDataSets = append(remoteDataSets, dataset)
+			}
 		}
 	}
 
@@ -134,10 +136,7 @@ func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Da
 			for j := i + 1; j < len(remoteDataSets); j++ {
 				remoteDataSet = remoteDataSet.getMergeDataSet(&remoteDataSets[j])
 			}
-			if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
-				remoteDataSet.changeSchema(tableSchema)
-				remoteDataSets[i] = remoteDataSet
-			}
+			remoteDataSets[i] = remoteDataSet
 		}
 	}
 
@@ -145,6 +144,7 @@ func (c *Cluster) ScanTableWithRowIds(tableSchema *TableSchema, rowIds []int) Da
 	loc := len(tableSchema.ColumnSchemas)
 	for _, remoteDataSet := range remoteDataSets {
 		if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+			remoteDataSet.changeSchema(tableSchema)
 			for _, row := range remoteDataSet.Rows {
 				rowsMap[row[loc].(int)] = row
 			}
@@ -169,10 +169,12 @@ func (c* Cluster) ScanTableWithSchema(tableSchema *TableSchema) Dataset {
 		c.network.Connect(remoteEndName, remoteId)
 		c.network.Enable(remoteEndName, true)
 
-		var remoteDataSet Dataset
-		remoteEnd.Call("Node.ScanTableWithSchema", []interface{}{*tableSchema}, &remoteDataSet)
-		if len(remoteDataSet.Rows) > 0 {
-			remoteDataSets = append(remoteDataSets, remoteDataSet)
+		var dataSets []Dataset
+		remoteEnd.Call("Node.ScanTableWithSchema", []interface{}{*tableSchema}, &dataSets)
+		for _, dataSet := range dataSets {
+			if len(dataSet.Rows) > 0 {
+				remoteDataSets = append(remoteDataSets, dataSet)
+			}
 		}
 	}
 
@@ -180,6 +182,7 @@ func (c* Cluster) ScanTableWithSchema(tableSchema *TableSchema) Dataset {
 	resultDataSet.Schema = *tableSchema
 	for i, remoteDataSet := range remoteDataSets {
 		if len(remoteDataSet.Schema.ColumnSchemas) == len(tableSchema.ColumnSchemas) {
+			remoteDataSet.changeSchema(tableSchema)
 			resultDataSet.Rows = append(resultDataSet.Rows, remoteDataSet.Rows...)
 		} else {
 			for j := i + 1; j < len(remoteDataSets); j++ {
